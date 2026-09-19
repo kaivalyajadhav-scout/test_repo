@@ -1,402 +1,323 @@
-# USER_GUIDE.md — Operating Manual
+# PROJECT.md — NFH 0DTE SPX Iron Fly Engine
 
-**For:** you, the operator · **Not for:** opencode (that's `PROMPTS.md`)
-**Companions:** `PROJECT.md` (scope) · `AGENTS.md` v5 (rules) · `PROMPTS.md` (build prompts)
-**Revision:** v2 · 2026-09-18
+**Status:** pre-build, data phase · **Revision:** v2 · 2026-09-18
+**Companion files:** `AGENTS.md` v5 (rules spec — authoritative) · `PROMPTS.md` (build prompts) · `USER_GUIDE.md` v2 (operating manual)
 
 ---
 
-## 0. The 60-second version
+## 1. What this project is
 
-You are building a backtest to answer one question: **does the add/drop cycle
-actually earn anything, or does it just reshape a fair-value premium sale into
-many small wins and rare large losses?**
+A **standalone Python engine** that backtests, and later executes, a 0DTE SPX
+iron fly strategy known as "Not for the Faint of Heart" (NFH).
 
-Your job at each stage is **not** to find the best number. It is to decide
-whether the number in front of you is real.
+Two layers:
 
-**Three rules that protect the whole project:**
+1. A **rules engine** implementing the strategy as pure, testable functions.
+2. **Adapters** that feed it data — historical replay first, broker second.
 
-| Rule | Why |
+### What this project is NOT
+
+| Not this | Why it matters |
 |---|---|
-| Run the holdout **once** | No recovery. Burn it and you wait for new market data. |
-| Adopt nothing under **1σ** | Below that you are selecting noise and calling it a decision. |
-| Never change a rule to fix a result | That converts a failed strategy into a fitted one. |
-
-**A negative verdict is a successful project.** You will have spent ~$120 and a
-few weeks to avoid risking $25,000 on a strategy that does not survive contact
-with real fills.
+| An Options Alpha bot | OA bots are built in a visual no-code editor and cannot be authored as source. The OA template was only the origin of the parameter defaults in `AGENTS.md` §4. Do not build an OA integration, API client, or replication layer. |
+| A general options backtesting framework | Single strategy, single instrument. Resist generalising. |
+| A live trading system (yet) | Live execution is Phase 2 and is **blocked** on backtest sign-off. |
+| A parameter optimiser | See §5. The goal is a defensible answer, not a maximised number. |
 
 ---
 
-## 1. Before you start
+## 2. The strategy in plain terms
 
-### What you need
+Sell an at-the-money 0DTE iron fly on SPX at 11:00 ET, once the open has settled.
+As SPX drifts away from the fly's center strike, add a second fly in the
+direction of travel. When price comes back and touches the center of the nearer
+fly, drop the farther one. Repeat all afternoon. After 14:00 ET, switch to
+tighter spacing and deliberately stack 2–3 flies into cash settlement, where most
+of the day's remaining theta decays. Cut any individual fly while it is still
+inside its expiration breakeven so losses stay small relative to wins.
 
-| Item | Notes |
-|---|---|
-| Python 3.11+ | Standard scientific stack |
-| opencode | Any capable coding agent |
-| ThetaData **Options Value** | ~$40/mo — SPXW chain quotes |
-| ThetaData **Index Value** | **Mandatory, separate product.** SPX 1-min spot, VIX, settlement close. Price TBC on their pricing page |
-| Theta Terminal **v3** | Local process; no data flows without it |
-| ~5 GB disk | Raw cache plus Parquet |
-| Tradier account | Phase 2 only |
+The source author's analogy: you are pouring water from a moving pitcher into a
+glass, and when the pitcher drifts past the rim you add a second glass rather
+than chase with the first.
 
-Both subscriptions are required. An Options plan does **not** include SPX or VIX,
-and three hard requirements depend on Index: the spot series driving every
-trigger, VIX for the halt rules, and the settlement close.
-
-### Files in the repo root
-
-```
-AGENTS.md      <- opencode reads this automatically
-PROJECT.md     <- scope and MVP definition
-PROMPTS.md     <- your copy-paste source
-USER_GUIDE.md  <- this file, for you
-```
-
-### Time budget, realistically
-
-| Phase | Effort |
-|---|---|
-| D0–D3 — setup, probe, pilot, gates | 1–2 sessions |
-| D4 — full pull | **Hours, unattended** |
-| M1 — rules engine | 1–2 sessions — **run concurrently with D4** |
-| M3–M4 — engine and scenarios | 2–3 sessions. **This is where bugs hide** |
-| M5 — path gate | 1 session |
-| M6 — staged runs | 3–5 sessions, one stage at a time |
-| M7–M8 — holdout and verdict | 1 session |
-
-Do not compress M3–M4. Everything downstream inherits those bugs.
+**Mechanically:** short gamma at the highest-gamma point on the surface, with a
+rules-based recentering hedge, held into cash settlement.
 
 ---
 
-## 2. How to run a session
+## 3. The actual research question
 
-1. Open opencode in the repo.
-2. **Paste P0 from `PROMPTS.md`.** Every session — context resets and drift
-   starts there.
-3. Check the six comprehension answers. Wrong answers → re-paste, don't proceed.
-4. Paste the milestone prompt.
-5. Verify the acceptance check **yourself**. Do not accept "tests pass" as a
-   report; run them.
-6. Commit before moving on.
+> Does the add/drop recentering cycle generate edge, or does it merely reshape a
+> fair-value premium sale into many small wins and rare large losses?
 
-### When opencode pushes back
+**Null hypothesis to disprove — not confirm:**
+NFH is a fair-value premium-selling strategy whose reported results came from
+operator discretion and a favourable volatility regime, and which does not
+survive mechanical execution at realistic fills.
 
-It will eventually suggest relaxing something — loosening a test tolerance,
-skipping a quality gate, adjusting a threshold so a scenario matches.
-
-**The answer is always no.** If you genuinely think a rule is wrong, stop, edit
-`AGENTS.md` yourself, note why, then re-run. Rules change by your decision,
-recorded in the spec — never inside a coding session to make something pass.
+The source operator openly overrides his own rules intraday. Expect the
+mechanical version to underperform the anecdote. **Build the backtest to try to
+kill the strategy.** A build that can only produce flattering numbers has failed
+regardless of what it prints.
 
 ---
 
-## 3. D0–D4: getting trustworthy data
+## 4. MVP definition
 
-### D0 — environment and the blocking question
+The narrowest artifact that can answer §3 credibly.
 
-Three things you verify personally:
+### In scope
 
-1. **Terminal access levels at startup.** Both products visible. Options
-   historical reaching 2020-01-01, index reaching 2023-01-01.
-2. **The §6.7 answer.** Does `index/history/price` at `interval=1m` return an
-   **OHLC bar** (open/high/low/close) or a **single point-in-time value** per
-   minute? Make opencode print the raw response and quote the actual field
-   names. Do not let it infer this from documentation.
-3. **Both subscriptions billing.** Confirm Index Value is actually active, not
-   just added to a cart.
-
-**Why #2 matters more than anything else in the D phase:**
-
-| If SPX 1-min is… | Consequence |
-|---|---|
-| **OHLC** | Intrabar touch detection works. M5 runs as originally specified. |
-| **Snapshot only** | Touches detectable **only at minute boundaries**. Any touch that occurs and reverts inside a minute is **invisible** — a systematic bias that under-counts both drops and adds. |
-
-The source author explicitly describes touches that revert before he can click.
-Under snapshot-only, that entire population vanishes from the backtest.
-
-It does not necessarily kill the project — minute-boundary detection is arguably
-closer to what a human operator reacts to. But it changes what M5 is testing, so
-settle it before opencode writes that code.
-
-### D1–D2 — probe, then pilot
-
-**Check in the probe output:**
-- ~122 contracts on a normal day, 390 minutes
-- continuous quotes, **including on wings that never traded**
-- SPX index sample with field names visible
-- SPX `eod.close` and the timestamp of the final print (expect ~16:04–16:05 ET)
-
-Then pull **20 pilot days only**. Extrapolate elapsed time × 25 for the full
-pull. A schema or coverage mistake replicated across 500 days is hours wasted.
-
-### D3 — gates and the guard
-
-All six quality gates pass on the pilot days. Then **break the holdout guard
-yourself**:
-
-```python
-loader.load("2026-03-15")             # must raise
-loader.load("2026-03-15", stage=8)    # must succeed
-```
-
-This is the one guardrail with no recovery path. Test it before you need it.
-
-### D4 — full pull
-
-Launch it and **start M1 immediately**. The rules layer is pure and needs no
-data, so the download and the engine build overlap. That overlap is the whole
-point of the data-first ordering.
-
----
-
-## 4. M1–M4: building and verifying
-
-### M1 — rules engine
-
-Runs with **no data and no network**. If opencode asks for a data file here,
-purity has been violated.
-
-```bash
-pytest tests/ -v
-grep -rn "now()\|open(\|requests" core/rules.py core/sizing.py   # expect nothing
-```
-
-Open `config/default.yaml` and find `be_pct`, the three tier distances, the add
-offset, `bp_utilization`, `target_flies`. If you can't find them without reading
-Python, config extraction is incomplete.
-
-**The test that matters most:** stop unreachability. It encodes the measured
-finding that the −25% stop fires 13–15 points wider than the price exit at every
-hour. If it fails, either the pricing model or the rule is wrong — do not let
-anyone "fix" it by adjusting the test.
-
-### M3–M4 — engine and scenarios
-
-**Read one full event log by hand.** Not the summary — the log. Entry at 11:00,
-adds at plausible distances, drops when price returns, the 14:00 switch, 2–3
-flies into settlement.
-
-**Scenarios A and B must reproduce the fly sequence exactly.** P&L within a loose
-band is fine — the source gives strike paths, not the vol surface. A sequence
-divergence is an engine bug, and everything downstream is meaningless until fixed.
-
-| Symptom | Likely cause |
-|---|---|
-| Sequence diverges at first add | Tier selection or distance measurement |
-| Diverges after a drop | Anchor not recentering (§3.2) |
-| Extra fly before 14:00 | Two-fly cap or evaluation order |
-| Only ever 1 fly | Adds not firing — check the whole add path |
-| **P&L off, sequence right** | **Settlement using 16:00 quote, not `eod.close`** |
-| Exits consistently worse than expected | `snapshot_latency` not modelled |
-| Win rate > 85% | Almost certainly a bug on short gamma |
-
----
-
-## 5. M5 — the path-sensitivity gate 🛑
-
-**The single most important number in the project.**
-
-### What it asks
-
-**Its definition depends on the D0 §6.7 answer.** If SPX 1-min is OHLC, M5
-measures intrabar event ordering — you know the high and the low but not which
-came first. If snapshot-only, it measures sensitivity to *unobservable*
-sub-minute excursions. Different test, same threshold.
-
-### What to do
-
-```
-spread = |pnl_conservative − pnl_optimistic| / mean(both)
-```
-
-| Spread | Meaning | Action |
+| # | Deliverable | Done when |
 |---|---|---|
-| **< 25%** | Ambiguity is minor | Proceed with confidence |
-| **25–50%** | Material but tolerable | Proceed; treat single-stage results with suspicion |
-| **> 50%** | Ambiguity exceeds the effect you're measuring | 🛑 **STOP** |
+| 1 | Core rules engine (`core/`) | Pure functions; all `AGENTS.md` §8 unit tests pass |
+| 2 | ThetaData v3 downloader (Options + Index) | 2yr SPXW 1-min NBBO + SPX/VIX cached, resumable, all §6.8 gates pass |
+| 3 | Backtest adapter + engine loop | Replays a full day; §3.5 evaluation order provably enforced |
+| 4 | Scenario validation | §8 Scenarios A and B reproduce the fly sequence |
+| 5 | Reporting | §9 metrics + `backtest/ledger.csv` audit trail |
+| 6 | Staged experiment runner | §13 stages 1–8 executable and reproducible from config |
 
-Also check the **collision count** — intervals where both a drop and an add
-triggered. A high count with a passing spread means you were lucky, not safe.
+### Explicitly out of scope for MVP
 
-### If it fails
+- Tradier / live / paper execution (Phase 2)
+- Any UI, dashboard, web service, or notebook front-end
+- Multi-symbol, multi-strategy, or non-0DTE support
+- Real-time streaming or websockets
+- Portfolio-level or cross-strategy risk management
+- Machine learning, signal discovery, or automated parameter search
 
-1. **Upgrade to ThetaData Standard (~$80/mo).** Tick-level data on the same API
-   you've already built against — only the loader changes. This is a $40/mo
-   delta, not a vendor migration.
-2. **Stop.**
-
-Proceeding anyway produces numbers with error bars wider than the thing you're
-trying to detect — and you will believe them, because they'll look like results.
+If a task does not move §3 closer to an answer, it is out of scope.
 
 ---
 
-## 6. M6 — reading staged results
+## 5. Success criteria
 
-### First, get σ
+**The MVP succeeds if it produces a trustworthy answer — including an
+unfavourable one.**
 
-Before Stage 2, the bootstrap gives you the standard deviation of profit factor
-across 10 resamples of train. **Write it down.** Typical values land around
-0.1–0.3; if σ comes back at 0.5+, your sample is too noisy for fine distinctions
-and you should only trust large effects.
+A result of "this strategy does not survive realistic fills" is a **successful
+MVP**. It saves real capital and answers the question asked. Do not treat a
+negative result as a failed build or a prompt to widen the search.
+
+| Criterion | Requirement |
+|---|---|
+| Correctness | §8 scenarios reproduce the source author's hand-worked days |
+| Honesty | Headline judged at `fill=realistic` × `intrabar=conservative` only |
+| Reproducibility | Any run regenerable from `run_id` + `git_sha` + `config_hash` |
+| Discipline | Holdout window touched exactly once, provable from the ledger |
+| Restraint | ≤48 tuning runs total (`AGENTS.md` §13.12) |
+
+### Anti-criteria — signs the project has gone wrong
+
+- Headline figures quoted at `optimistic` fills
+- The holdout window run more than once
+- New parameters added because the pre-registered ones didn't find a winner
+- Stage 2 re-run with different defaults until it clears
+- A "best combination" adopted on an improvement smaller than the 1σ noise margin
+
+---
+
+## 6. Non-negotiables
+
+Correctness and safety requirements. **Never** toggled to improve a result
+(`AGENTS.md` §13.10). There are **five**:
+
+1. **Combo-fill integrity.** A partial 4-leg fill leaves you naked short an SPX
+   option. At ~20 flies/day × 8 leg-sides this *will* occur. Combo-only orders,
+   immediate detection, forced completion or flatten.
+2. **AM/PM settlement guard.** Third-Friday standard SPX is AM-settled and **SET
+   is that symbol, not SPXW** (vendor-confirmed). Trade SPXW only.
+3. **Evaluation order.** Drop check *before* add check, every cycle.
+4. **Data quality gates.** A replay that has not passed `AGENTS.md` §6.8 produces
+   numbers, not results.
+5. **Train/holdout guard.** The loader refuses the holdout unless `stage=8`. The
+   one guardrail that cannot be restored once broken.
+
+Plus two architectural rules: the rules layer stays **pure** (state snapshot in,
+decision out — no I/O, no clock, no broker calls), and the engine runs **one code
+path** whether backtesting or live.
+
+---
+
+## 7. Architecture
 
 ```
-adopt only if (variant_PF − base_PF) > 1σ
+  ThetaData Options ──┐
+  (SPXW 1-min NBBO)   │      ┌──────────────┐
+                      ├────► │ data/        │ ──┐  ChainSnapshot
+  ThetaData Index ────┘      │ loader,      │   │  + spot / VIX
+  (SPX spot, VIX,            │ index,       │   │
+   eod.close)                │ quality, iv  │   │
+                             └──────────────┘   │
+                                                ▼
+  ┌───────────────┐          ┌─────────────┐          ┌──────────────┐
+  │ adapters/     │ ◄──────► │ core/engine │ ◄──────► │ core/rules   │
+  │ backtest.py   │          │ (cycle loop)│          │ core/sizing  │
+  │ tradier.py    │          │             │          │ (PURE)       │
+  └───────────────┘          └─────────────┘          └──────────────┘
+                                    │
+                                    ▼
+                            ┌──────────────┐
+                            │ backtest/    │
+                            │ runner,report│──► ledger.csv
+                            └──────────────┘
 ```
 
-On ties or anything close, **keep the simpler config**.
+**Design rule:** the engine orchestrates; the rules decide; the adapters supply
+prices and accept orders. A pure decision layer is what allows the §8 scenarios
+to run with no data subscription and no network.
 
-### Stage 2 — the defect checklist comes first
+Full module layout in `AGENTS.md` §12.
 
-Before reading any P&L:
+---
 
-| Check | Bad sign | Meaning |
-|---|---|---|
-| `stop_25` count | **Any material count** | Bug — it's measurably unreachable (§3.7) |
-| Fly count | Routinely 1 | Adds not firing; the strategy isn't running |
-| Scenario tests | Now failing | Engine regressed since M4 |
-| Quality gates | Failures on test days | You're replaying bad data |
-| Settlement | Not `eod.close` | Every held fly biased the same direction |
+## 8. Data
 
-**Only after a clean checklist does P&L mean anything.**
+**Two subscriptions required** — Index is a separate product and an Options plan
+does not include SPX or VIX.
 
-| Profit factor | Action |
+| Product | Tier | Provides | First access |
+|---|---|---|---|
+| Options | Value (~$40/mo) | SPXW chain: EOD, OHLC, **Quote**, Open Interest | 2020-01-01 |
+| **Index** | Value (price TBC) | **SPX 1-min spot, VIX 1-min, SPX eod.close** | 2023-01-01 |
+
+| Item | Value |
 |---|---|
-| > 1.2 | Promising pre-tuning — proceed |
-| 1.0–1.2 | Marginal — Stage 3 matters a lot |
-| 0.9–1.0 | Proceed; a real defect plausibly eats it |
-| 0.6–0.9 | Proceed **only** with a mechanical explanation from Stage 3 |
-| < 0.6 | 🛑 Stop. No exit tweak recovers that |
+| Instrument | SPXW 0DTE, PM cash-settled |
+| Granularity | 1-minute NBBO snapshots (not bars) |
+| Test window | 2024-09 → 2026-09 |
+| IV lookback | back to 2023-09 |
+| Strike coverage | `strike_range=30` ≈ ±150 points |
+| Volume | ~24M rows / ~1–2 GB partitioned Parquet |
+| API | **v3** |
 
-**Check concentration.** Three catastrophic days against 497 profitable ones means
-tail management is broken — fixable. Steady daily erosion means you're selling
-fair-value gamma and paying spread — not fixable by parameters.
+**Settlement:** SPXW settles to the SPX index close from `index/history/eod.close`.
+The index prints until ~16:04–16:05 ET, so the **16:00:00 quote is not
+settlement** — using it biases every held fly in the same direction.
 
-### Stage 3 — exits (highest value)
+**Why ThetaData over Massive:** Massive's entry tier supplies bars derived from
+qualifying *trades* and produces no bar when no eligible trade occurs. Wings sit
+20–50 points OTM and routinely go minutes without trading. NBBO quotes exist
+continuously. Full rationale in `AGENTS.md` §6.6.
 
-Look at **profitable-breakeven-exit share by hour** first. Under `static_85` it
-should climb sharply in the last two hours, confirming the documented inversion:
-your loss-cutter has become a profit-taker during the window the strategy claims
-most of its theta.
+**Bulk resolved:** the full chain for one underlying in one request
+(`expiration=*`) is available at Value. Flat Files are whole-market dumps limited
+to the 7 most recent days — irrelevant here. **Do not upgrade to Professional.**
 
-Expect `stop_basis: none` ≈ `credit`. That's the unreachability finding
-confirming itself. If they differ materially, something is wrong.
+### Open blocking question (`AGENTS.md` §6.7)
 
-### Stage 4 — calendar filters
+> Does `index/history/price` at `interval=1m` return an **OHLC bar** or a
+> **point-in-time snapshot** per minute?
 
-**Judge on the tail, not the mean.** If skipping CPI halves your worst day and
-costs 2% of mean return, take it.
-
-### Stage 5 — volatility halts
-
-Key output is **slippage on halt exits vs. normal exits**. If `halt_adds_only`
-matches `flatten` on drawdown but avoids the slippage, it wins. `max_vix: none`
-tells you how censored the sample was.
-
-### Stage 6 — structure
-
-If Stage 1's spread was wide, **confirm `touch_confirm` was dropped** from the
-matrix. Testing it on data that can't resolve it generates numbers that mean
-nothing — and you'd adopt one.
-
-### Stage 7 — sizing
-
-**Sanity check first:** below ~$50k equity, `fixed_1` and `weekly_scaling` must
-be *identical*. A difference in train is a bug — investigate before reading
-anything else.
-
-Then drawdown as **% of equity**, and days spent within 10% of the $25,000 PDT
-threshold. If the curve lives near that line you have no buffer.
+Every trigger in this strategy reads SPX, not option prices. If snapshot-only,
+touches are detectable **only at minute boundaries** and any touch that reverts
+inside a minute is invisible — a systematic bias that under-counts both drops and
+adds. This determines how M5 is defined. **Resolve before D4.**
 
 ---
 
-## 7. M7 — the holdout 🛑
+## 9. Known hazards
 
-**Before:** ledger complete, top 3 configs written down, baseline identified, and
-you have accepted that this is the answer whatever it says.
-
-Six runs. `fill=realistic`, `intrabar=conservative`, `stage=8`. No tuning, no
-re-runs. **If something looks wrong, report it — do not fix and re-run.**
-
-| Outcome | Action |
+| Hazard | Consequence |
 |---|---|
-| Train winner wins holdout, similar magnitude | Adopt |
-| Wins with much smaller margin | Adopt cautiously; expect the smaller number |
-| **Rankings invert** | **Ship the baseline** — train was noise |
-| Everything negative | Do not trade |
+| **§6.7 unresolved** | Determines whether touch detection is intrabar or minute-boundary. Blocks M5's definition. |
+| **Snapshot latency** | Value quotes are 1-min snapshots; a trigger between them prices at the next one. Systematic drag, must be modelled. |
+| **Fill assumptions dominate** | ~20 flies/day × 8 leg-sides. Edge surviving only at mid does not exist. |
+| **Whipsaw is the core cost** | The drop rule is structurally buy-high/sell-low. Every oscillation pays a toll. Measured directly, never engineered away. |
+| **Censored sample** | Max VIX 30 conditions results on calm days — and VIX < 30 does not preclude a 2% intraday move. |
+| **Negative skew + win-streak sizing** | Adding a contract after a winning week puts maximum size on immediately before the tail event. This is what forced the source operator's own size cut. |
+| **Sequence risk** | Outcomes depend heavily on start date. Rolling 3-month windows, never a single CAGR. |
+| **Overfitting surface** | Full grid = 186,624 runs against ~500 days. Hence the staged protocol. |
 
-Rank inversion is the outcome people rationalize. Don't. It's the holdout doing
-exactly the job you built it for.
-
----
-
-## 8. M8 — the verdict
-
-Write it, then read it as someone who **wants the strategy to fail**.
-
-1. Did the add/drop cycle earn anything, or just reshape the distribution?
-2. **What did whipsaw cost?**
-3. Where did P&L actually come from — tail avoidance, exit discipline, or the
-   add/drop mechanism?
-4. How much depends on assumptions you couldn't verify?
-
-**If the answer is "this doesn't survive realistic fills," you are done and the
-project succeeded.** Do not tune further, add parameters, or re-run the holdout.
+Detail in `AGENTS.md` §7.
 
 ---
 
-## 9. Discipline checklist
+## 10. Method: staged sequential testing
 
-- [ ] P0 pasted this session
-- [ ] σ written down and being applied
-- [ ] Nothing adopted below 1σ
-- [ ] No rule changed to make a test or result pass
-- [ ] Holdout untouched (until M7)
-- [ ] Ledger has `git_sha` and `config_hash` for every run
-- [ ] Headline quoted at `realistic` × `conservative` only
-- [ ] Run count ≤ 48 total
-- [ ] Defect checklist clean before interpreting any P&L
+Vary **one family of parameters at a time**, fix the winner, then test the next
+family against that base.
 
-**If you break one, write down which and when.** A documented deviation is
-recoverable; a forgotten one silently invalidates the verdict.
+- Full grid: **186,624 runs** — the best of which is almost certainly the
+  luckiest, not the best.
+- Staged: **48 runs** — same axes, far fewer degrees of freedom.
 
----
+Accepted trade-off: sequential testing can miss genuine interaction effects. A
+grid capable of finding real ones would also surface thousands of false ones,
+with no way to distinguish them at ~500 days. A missed interaction costs upside;
+a fitted one costs capital.
 
-## 10. Quick reference
+**Data split — fixed before the first run:**
 
-| Milestone | You verify | Gate |
+| Window | Period | Use |
 |---|---|---|
-| D0 | Both subscriptions live; **§6.7 answered** | Terminal reports both |
-| D1 | Probe shape; SPX field names; `eod.close` timing | Coverage confirmed |
-| D2 | 20 pilot days on disk | Extrapolate full-pull time |
-| D3 | Six gates; holdout guard raises | Data trustworthy |
-| D4 | Manifest complete | Blocked until §6.7 resolved |
-| M1 | Tests green with **no data files** | Purity holds |
-| M3 | Event log reads sensibly; ordering test passes | Engine sane |
-| M4 | Scenario **sequences** reproduce | 🛑 Engine correct |
-| M5 | Path spread **< 50%** | 🛑 Data sufficient |
-| M6 | σ applied every stage; ≤42 runs | Discipline held |
-| M7 | Six runs, one pass | 🛑 Holdout spent |
-| M8 | Verdict a skeptic would accept | 🛑 **Sign-off** |
-| M9 | ≥20 paper sessions | Live matches backtest |
-| M10 | Start at 1 contract | — |
+| Train | 2024-09 → 2025-12 | All tuning |
+| Holdout | 2026-01 → 2026-09 | Touched **once**, Stage 8 |
 
-### The five numbers that decide everything
+Stage 1 is a **gate**. Stage 8 is **one shot**. If train and holdout rankings
+invert, ship the baseline — the train result was noise.
 
-| Number | Where | Decides |
+---
+
+## 11. Milestones — data-first
+
+| # | Milestone | Gate |
 |---|---|---|
-| **SPX 1-min shape** | **D0** | How M5 is even defined |
-| **Path spread** | M5 | Whether the data can answer the question |
-| **σ** | M6.0 | What counts as a real improvement |
-| **Whipsaw cost** | Every run | Whether the add/drop cycle earns its keep |
-| **Holdout profit factor** | M7 | Whether any of it was real |
+| D0 | Both subscriptions; Terminal v3; **resolve §6.7** | Terminal reports access for both products |
+| D1 | Probe one day: chain + SPX index sample | ~122 contracts × 390 min; SPX shape known |
+| D2 | Downloader, 20 pilot days | Pilot on disk; full-pull time extrapolated |
+| D3 | Quality gates + holdout guard | Six gates pass; guard provably raises |
+| D4 | **Full pull**, unattended | Manifest complete; gates pass across range |
+| M1 | Rules engine + unit tests | §8 unit tests green — **build during D4** |
+| M3 | Engine loop + backtest adapter | One real day replays; ordering provable |
+| M4 | Scenario validation | Sequences A and B reproduce |
+| M5 | **Path-sensitivity gate** | **Spread < 50% of mean P&L, or STOP** |
+| M6 | Staged runs 2–7 | ≤42 runs, ledger complete |
+| M7 | Holdout confirmation | One shot, 6 runs |
+| M8 | **Written verdict** | **Human sign-off — hard stop** |
+| M9 | Tradier paper adapter | ≥20 sessions |
+| M10 | Live, 1 contract | — |
 
-### If you remember nothing else
+**M1 runs concurrently with D4** — the rules layer is pure and needs no data.
+**M8 is a hard stop.** Do not begin Phase 2 without explicit sign-off.
 
-Run the holdout once. Adopt nothing under 1σ. Never change a rule to fix a
-result. On short gamma, a surprisingly **good** number is evidence of a bug until
-proven otherwise. A negative verdict is a win.
+**If M5 fails:** upgrade to ThetaData Standard (~$80/mo) for tick-level data on
+the same API — only the loader changes — or stop. It is not a vendor migration.
+
+---
+
+## 12. Glossary
+
+| Term | Meaning |
+|---|---|
+| **0DTE** | Zero days to expiration — opens and expires the same session |
+| **SPXW** | Weekly SPX options, **PM** cash-settled. What this strategy trades |
+| **SET** | AM settlement symbol for standard third-Friday SPX. Must never enter the book |
+| **Iron fly** | Short ATM straddle + long protective wings; 4 legs, one expiry |
+| **Center** | The shared short strike `K` of a fly. All triggers reference this |
+| **Wings** | Long outer legs. Exist **only** for buying-power efficiency — no rule may reference a wing strike |
+| **Credit** | Net premium received per contract, in points, positive |
+| **Anchor fly** | The open fly whose center is closest to current SPX. Drives tier selection and add distance |
+| **Add** | Opening a new fly after SPX travels a tier-defined distance from the anchor's center |
+| **Drop** | Closing the farther fly when SPX touches the nearer fly's center. Unconditional on P&L |
+| **Tight mode** | Post-14:00 ET regime: 2.5-point trigger, 5-point spacing, fly cap lifted |
+| **Breakeven** | `center ± credit` at expiration |
+| **`be_pct`** | Fraction of breakeven distance at which a fly is cut (default 0.85) |
+| **Snapshot latency** | Delay between a trigger firing and the next 1-min quote that can price it |
+| **Whipsaw cost** | Realized P&L on add-then-drop round trips closing within 30 min — the strategy's recurring toll |
+| **PDT** | Pattern day trader. Below $25k equity, intraday round-trips are blocked — and the drop rule round-trips constantly |
+| **Profit factor** | Gross profit ÷ gross loss. The primary metric |
+
+---
+
+## 13. Where the detail lives
+
+| Question | File |
+|---|---|
+| What are the exact rules, thresholds, tests? | `AGENTS.md` §3–§9 |
+| What variants do we test, in what order? | `AGENTS.md` §13 |
+| What do I tell opencode to build, step by step? | `PROMPTS.md` |
+| How do I run it and read the results? | `USER_GUIDE.md` |
+
+**`AGENTS.md` is authoritative on all rules and parameters.** Where this document
+summarises, it simplifies; on any conflict, `AGENTS.md` wins.
