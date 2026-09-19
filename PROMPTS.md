@@ -93,33 +93,33 @@ Stop after printing. Do not build the downloader.
 
 ## D1 — Probe
 
+
 ```
-▶ PROMPT
+▶ PROMPT — D1 (revised)
 
-Read AGENTS.md sections 6.1 through 6.6 before starting.
+D0 resolved AGENTS.md §6.7: index/history/price supports interval=1s on our
+Index Value tier, returning every second densely. Touch detection is therefore
+sub-minute, NOT minute-boundary. Update AGENTS.md §6.7 to record this.
 
-Do NOT build the full downloader yet. Write a probe script only.
+Now probe ONE full day (2026-09-17) at production settings and report:
 
-The probe should pull ONE trading day of SPXW 0DTE option data from ThetaData
-and print:
-- total rows returned
-- distinct strikes, and the min/max strike relative to that day's SPX open
-- first and last timestamp, and the count of distinct minutes
-- how many strikes have continuous quotes across the session vs. gaps
-- whether bulk endpoints (all contracts for one symbol+expiration in a single
-  request) are available on this subscription tier
-- the earliest date the account can access, to confirm history depth
-- an SPX index sample for the same date via index/history/price at interval=1m,
-  with its exact field names
-- the SPX index close from index/history/eod for that date, and the timestamp of
-  the final print
+1. option/history/quote: root=SPXW, expiration=*, strike_range=30, max_dte=0,
+   right=both, interval=1m. Report row count, distinct strikes, distinct
+   minutes, and how many strikes have gaps.
+2. index/history/price: SPX, interval=1s. Row count, gap distribution, and any
+   price of 0.0 or deviating >5% from the prior print.
+3. Same for VIX at interval=1s — confirm it is permitted and dense.
+4. Elapsed wall-clock time for each call. I need this to extrapolate a 504-day
+   pull.
+5. Estimated on-disk Parquet size per day for each dataset.
 
-Check the Theta Terminal is running first and fail loudly with a clear message
-if it is not. Do not retry silently.
-
-Print the raw response shape before any parsing so I can see what we actually
-receive. Stop after printing — do not proceed to building the downloader.
+Do not build the full downloader yet. Report and stop.
 ```
+
+Then D2 pulls 20 pilot days, D3 runs gates (now **seven**), D4 goes unattended.
+
+---
+
 
 **Check:** ~122 contracts, 390 minutes, continuous quotes on wings that never
 traded, bulk endpoints confirmed.
