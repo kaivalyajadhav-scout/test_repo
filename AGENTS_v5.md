@@ -3,32 +3,37 @@
 **Authoritative rules specification.** Where `PROJECT.md` summarises, it
 simplifies; on any conflict, **this file wins**.
 
-**Revision:** v5 · 2026-09-18
+**Revision:** v6 · 2026-09-19
 **Companions:** `PROJECT.md` (scope/MVP) · `PROMPTS.md` (build prompts) · `USER_GUIDE.md` (operating manual)
 
 Read end to end before writing code.
 
-### Changes in v5
+### Changes in v6 — D0 results
 
-Vendor-confirmed data facts folded in (ThetaData support, written).
+D0 environment verification completed against SPXW/SPX 2026-09-17. §6.7 is
+**resolved**, and resolved favourably.
 
 | § | Change |
 |---|---|
-| 6.1 | **Two subscriptions required.** Index Value is separate from Options Value and is mandatory — SPX spot, VIX and settlement all live there. |
-| 3.8, 7.2 | **Settlement corrected.** SPXW settles to the SPX index close from `index/history/eod.close`. The index prints until ~16:04–16:05 ET; the 16:00:00 quote is **not** settlement. |
-| 6.5 | **New: `snapshot_latency`.** Value option quotes are 1-min point-in-time NBBO snapshots, not bars. Triggers price at the next snapshot. |
-| 6.6 | Confirmed request shape; build on **v3**; Flat Files irrelevant (7-day window). |
-| 7.1, 7.3, 13.1 | **Intrabar hazard reframed and BLOCKED** pending §6.7 — the M5 test definition depends on whether SPX 1-min is OHLC or snapshot. |
-| 6.7 | **New: open blocking question.** Resolve before D4. |
-| 11 | Build order is **data-first** (D1–D4 precede the engine). |
+| 6.7 | **RESOLVED.** `index/history/price` supports **`interval=1s`** on Index Value — 23,403 dense rows/session, repeats *not* omitted. Touch detection is **sub-minute**, not minute-boundary. |
+| 6.2 | SPX and VIX move to **1-second**. Lookback year stays 1-minute. |
+| 6.5 | **`snapshot_latency` promoted to a primary parameter.** It is now the dominant modelling hazard, not a minor adjustment. |
+| 6.6 | Confirmed: CSV responses, column names, `strike_range = 2N+1`, base URL, both subscriptions active. |
+| 6.8 | **New gate #7** — reject index price of 0.0 or >5% deviation. The 09:30:00 print is literally `0.0`. |
+| 3.8, 7.2 | Settlement empirically confirmed: `last_trade` 16:04:58, close 7637.76 vs 16:00 price 7637.90 — **0.14 pts = $14/contract**. |
+| 7.1 | Intrabar hazard for **triggers** largely dissolved; replaced by trigger/fill asymmetry. |
+| 13.1 | M5 redefined a third time — now measures **option-quote latency sensitivity**. Downgraded from hard gate to expected formality. |
+| 13.6 | **`touch_confirm` restored as a first-class axis** — directly testable at 1s. |
 
-### Changes in v4
-Build order became data-first; §13.1 gate retained as a data-sufficiency check
-rather than a purchase decision.
+### Changes in v5
+Two subscriptions confirmed required; settlement corrected to
+`index/history/eod.close`; `snapshot_latency` introduced; bulk question resolved;
+build on v3.
 
-### Changes in v3
-§3.7 corrected — the −25% stop is measurably *unreachable*, not "usually fires
-first." §3.9 combo-fill integrity added. Train/holdout split fixed in-spec.
+### Changes in v4 / v3
+Data-first build order. §3.7 corrected — the −25% stop is measurably
+*unreachable*. §3.9 combo-fill integrity added. Train/holdout split fixed
+in-spec.
 
 ---
 
@@ -36,12 +41,13 @@ first." §3.9 combo-fill integrity added. Train/holdout split fixed in-spec.
 
 | # | Question | Resolution |
 |---|---|---|
-| 1 | Add reference point | **Anchor fly (recenter after every drop).** The transcript Q&A claim that distance is always measured from the day's first fly is disregarded. Single code path — no `first_fly` mode. |
+| 1 | Add reference point | **Anchor fly (recenter after every drop).** Transcript Q&A disregarded. No `first_fly` mode. |
 | 2 | Data vendor | **ThetaData.** Options Value (~$40/mo) **+ Index Value** (§6.1). |
-| 3 | Stop-loss basis | **−25% of credit received** as specified — but see §3.7, it is measurably unreachable. Fate decided by Stage 3. |
-| 4 | Position sizing | **Equity-scaled.** Weekly contract scaling plus a live fly cap from account equity. Flies take priority over contracts. §5. |
-| 5 | Account size | **$25,000 starting equity.** Capacity recomputes from live equity. §5.4. |
-| 6 | API version | **v3.** Vendor-recommended for new projects; all confirmed parameters are v3. |
+| 3 | Stop-loss basis | **−25% of credit received** — but see §3.7, measurably unreachable. Fate decided by Stage 3. |
+| 4 | Position sizing | **Equity-scaled.** Flies take priority over contracts. §5. |
+| 5 | Account size | **$25,000 starting equity.** §5.4. |
+| 6 | API version | **v3.** Base URL `http://127.0.0.1:25503`. |
+| 7 | **SPX trigger resolution** | **1-second** (§6.7). Confirmed available on Index Value. |
 
 ---
 
@@ -62,16 +68,12 @@ breakeven so losses stay small relative to wins.
 - Underlying: **SPX** (cash index, European, no assignment risk).
 - Options: **SPXW** 0DTE, **PM cash-settled**.
   - Third-Friday standard SPX is **AM-settled**, and **SET** is that symbol —
-    *not* SPXW (vendor-confirmed). Trade SPXW only. Assert on root/expiry so an
-    AM-settled contract can never enter the book (§8 test).
-- Strike grid: 5.00 points near ATM. One helper, `snap_strike(x, grid=5.0)`,
-  used everywhere a strike is computed.
+    *not* SPXW. Trade SPXW only. Assert on root/expiry (§8 test).
+- Strike grid: 5.00 points near ATM. One helper, `snap_strike(x, grid=5.0)`.
 - Multiplier: 100. P&L in dollars per contract unless suffixed `_total`.
 - Timezone: compute and store in **US/Eastern**. All times below are ET.
 
 ### Iron fly definition
-
-Four legs, same expiry, centered on strike `K`:
 
 | Leg | Strike | Side |
 |---|---|---|
@@ -81,10 +83,9 @@ Four legs, same expiry, centered on strike `K`:
 | Long call | `K + w` | Buy |
 
 - `credit` — net premium received per contract, in points, positive.
-- `center` — `K`.
-- `max_risk` — `(w − credit) × 100` dollars per contract.
-- Wings exist **only** for buying-power efficiency. **No trigger anywhere in this
-  engine may reference a wing strike.**
+- `center` — `K`. `max_risk` — `(w − credit) × 100` dollars per contract.
+- Wings exist **only** for buying-power efficiency. **No trigger may reference a
+  wing strike.**
 
 ---
 
@@ -97,19 +98,20 @@ Four legs, same expiry, centered on strike `K`:
 - Wing width **$50** for the first fly.
 - Reject if fly mid price outside `[3.00, 50.00]`.
 - Reject if combo bid/ask spread > `1.50`.
-- Record `open_credit` on the fly. Each fly carries its own credit; tier
-  selection reads the **anchor fly's** credit, not the day's first.
+- Record `open_credit`. Tier selection reads the **anchor fly's** credit.
+
+> **D0 validation.** The 09:30 SPXW quote sampled `bid=5.00 / ask=22.70` — a
+> $17.70 spread. The 11:00 entry and the 1.50 spread filter are both doing real
+> work. Any staleness or crossed-quote gate must exclude the opening minutes or
+> it will fire constantly.
 
 ### 3.2 Adds — distance from the anchor fly's center
 
-Each cycle, the **anchor fly** is the open fly whose center is closest to current
-SPX.
+Anchor fly = the open fly whose center is closest to current SPX.
 
 ```
 distance = abs(spx_price - anchor.center)
 ```
-
-Tier selected from `anchor.open_credit`:
 
 | Anchor credit | Trigger distance | Target spacing | Add offset |
 |---|---|---|---|
@@ -118,54 +120,56 @@ Tier selected from `anchor.open_credit`:
 | `> 20` | `> 15.0` | 20 apart | `3.00` |
 | after 14:00 ET | `> 2.5` | 5 apart | `0.01` |
 
-Boundaries inclusive on the mid tier — `15.00` and `20.00` both select mid. Unit
-test both edges exactly.
+Boundaries inclusive on the mid tier — `15.00` and `20.00` both select mid.
 
 ```
 center_new = snap_strike(spx_price + sign(spx_price - anchor.center) * add_offset)
 ```
 
-New-fly wing width is **priced, not fixed**: pick the long put strike whose mid is
-nearest **$0.40**, clamp width to `20 ≤ w ≤ 50`, mirror on the call side.
+New-fly wing width is **priced, not fixed**: long put strike whose mid is nearest
+**$0.40**, clamp `20 ≤ w ≤ 50`, mirror on the call side.
 
 > **Recentering is the defined behaviour.** After a drop, the survivor becomes the
-> anchor and all distances measure from it. No "distance from first fly" mode.
+> anchor. No "distance from first fly" mode.
 >
-> **Spacing note.** `spacing = trigger + add_offset` with one shared offset.
-> `3.00` lands the common tier exactly on 10-apart after snapping; the 15/20 tiers
-> land one strike tight in some cases. Accepted — do not make the offset
-> tier-dependent.
+> **Spacing note.** One shared offset; `3.00` lands the common tier exactly on
+> 10-apart after snapping. The 15/20 tiers land one strike tight in some cases.
+> Accepted — do not make the offset tier-dependent.
 >
-> **Known risk-scaling defect.** The $0.40 wing rule pushes the long strike
-> further out in high vol, *widening* wings and *raising* max risk exactly when it
-> should fall. Not fixed in the baseline; tested as `wing_cap_mode: vol_capped`
-> in Stage 6 (§13.6).
+> **Known risk-scaling defect.** The $0.40 wing rule widens wings in high vol,
+> *raising* max risk exactly when it should fall. Tested as `wing_cap_mode:
+> vol_capped` in Stage 6.
+
+**Evaluation cadence:** adds are evaluated against **1-second** SPX (§6.7), so a
+trigger is detected within ~0.5s on average. Pricing the resulting fill is a
+separate, coarser problem — see §6.5.
 
 ### 3.3 Drops — touch the center
 
 When SPX trades **at or through** the `center` of any open fly, close every other
-open fly whose center is **farther from SPX** than the touched fly. Two-fly case:
-touch the near fly, drop the far one.
+open fly whose center is **farther from SPX** than the touched fly.
 
 - **Unconditional on P&L.** A dropped fly is usually near its worst mark. That is
-  the point — a risk-reduction exit, not a loss exit. Never gate on profitability.
-- **Touch tolerance:** the touch must hold `touch_confirm_seconds` (default **10**)
-  in live. Detection fidelity in backtest depends on §6.7 — see §7.3.
+  the point — risk reduction, not a loss exit. Never gate on profitability.
+- **Touch tolerance:** the touch must hold `touch_confirm_seconds` (default
+  **10**). **At 1-second SPX resolution this is directly observable** — 10
+  samples per window — and is a genuine Stage 6 axis (§13.6), not an
+  approximation.
 - Log every drop **and** every suppressed near-touch with SPX, both centers, both
   marks.
 
 > **Structural note — do not "fix" this.** The drop rule is inherently
 > buy-high/sell-low: you add after a 7-point move, then drop when price returns.
 > Every oscillation pays a toll. This is the strategy's core recurring cost and
-> must be measured directly (§9 whipsaw cost), not engineered away.
+> must be measured (§9 whipsaw cost), not engineered away.
 
 ### 3.4 Two-fly cap
 
-- **11:00–14:00 ET:** never more than **2** open flies. An add that would create a
-  third is **suppressed and logged** — not queued.
+- **11:00–14:00 ET:** never more than **2** open flies. A third-creating add is
+  **suppressed and logged** — not queued.
 - **From 14:00 ET:** cap lifts; tight adds run freely, targeting 2–3 flies into
   settlement.
-- Hard ceiling **10 positions/day** regardless of time.
+- Hard ceiling **10 positions/day**.
 
 ### 3.5 Evaluation order — correctness requirement
 
@@ -178,8 +182,7 @@ touch the near fly, drop the far one.
 6. eod_handling()      # settlement
 ```
 
-A fast move otherwise opens a third fly in the same pass that should have closed
-one. Assert the ordering via the event log in tests.
+Assert the ordering via the event log in tests.
 
 ### 3.6 Loss exit — inside breakeven
 
@@ -188,77 +191,76 @@ Breakeven is `center ± credit`. Exit while SPX is still **inside** it, at
 
 ```
 exit_distance = be_pct * credit
-exit_lo, exit_hi = center - exit_distance, center + exit_distance
-close if spx_price <= exit_lo or spx_price >= exit_hi
+close if spx_price <= center - exit_distance or spx_price >= center + exit_distance
 ```
 
-Computed per-fly from that fly's own credit — a single float, **not** three
-hard-coded dollar tiers.
+Computed per-fly from that fly's own credit — a single float, **not** dollar
+tiers.
 
 Unit-test verbatim: credit `15.00`, center `5430` → BE `5415 / 5445` → exit at
 **`5417.25 / 5442.75`**.
 
 > **Known defect — the late-session inversion.** `be_pct` is a fixed *distance*,
 > but the fly's value at that distance changes as extrinsic decays. At 11:00 the
-> exit realises a genuine loss. By ~15:45 the same distance is nearly all
-> intrinsic and the exit closes at a **profit**.
->
-> The rule therefore stops being a loss-cutter and becomes a profit-taker during
-> the exact window the strategy claims most of its theta. Pre-registered for
-> Stage 3, where `time_scaled` and `dual_mode` are tested against it. **Required
-> diagnostic:** share of `breakeven` exits closing at a profit, bucketed by hour.
+> exit realises a genuine loss; by ~15:45 the same distance is nearly all
+> intrinsic and the exit closes at a **profit**. Pre-registered for Stage 3.
+> **Required diagnostic:** share of `breakeven` exits closing at a profit, by
+> hour.
 
 ### 3.7 Stop loss — measurably unreachable
 
-Specified as **−25% of credit received**. For credit `15.00` (= $1,500), stop at
-`−$375`/contract.
+Specified as **−25% of credit received**. Credit `15.00` → stop at `−$375`.
 
-Black-Scholes evaluation at 13% vol, 50-wide fly, credit ≈ 27.4 shows the price
-exit (§3.6) triggering 13–15 points earlier at *every* hour:
+Black-Scholes at 13% vol, 50-wide, credit ≈ 27.4 — the price exit (§3.6) triggers
+13–15 points earlier at *every* hour:
 
-| Time left | 85%-BE exit distance | Fly value there | Distance where −25% stop fires |
+| Time left | 85%-BE exit distance | Fly value there | Stop fires at |
 |---|---|---|---|
 | 5.0h | 23.3 pts | 30.3 | 37.9 pts |
 | 3.0h | 23.3 pts | 27.7 | 38.8 pts |
 | 1.0h | 23.3 pts | 24.3 | 36.2 pts |
 | 0.2h | 23.3 pts | 23.3 | 34.3 pts |
 
-Implications:
+1. Implement as specified. Do **not** delete pre-emptively.
+2. **`stop_25` firing is a bug signal.** Any material count → stop and
+   investigate: either the price exit is not evaluating or ordering is wrong.
+3. Fate decided by Stage 3 (`stop_basis: credit / max_risk / none`).
 
-1. Implement the stop as specified. Do **not** delete it pre-emptively.
-2. **`stop_25` firing in a backtest is a bug signal.** Any material count → stop
-   and investigate; either the price exit is not evaluating or ordering (§3.5) is
-   wrong.
-3. Its fate is decided by Stage 3 (`stop_basis: credit / max_risk / none`).
-
-### 3.8 End of day — settlement (vendor-corrected)
+### 3.8 End of day — settlement (D0-confirmed)
 
 - Survivors are **held into PM cash settlement**. Do not flatten at 15:59.
-- **SPXW settles to the official closing value of the SPX index.** ThetaData
-  publishes no separate settlement print on the option itself.
-- **Source:** `index/history/eod` → `close` field (requires the Index
-  subscription, §6.1).
-- **Critical timing:** the SPX index keeps printing until roughly **16:04–16:05
-  ET** as closing prices arrive. The `eod.close` value is the settlement; the
-  **16:00:00 quote is not**. Using the 16:00 print biases every held fly in the
-  same direction.
-- Settlement P&L from intrinsic value of all four legs at that close.
+- **SPXW settles to the official SPX index close**, from `index/history/eod` →
+  `close`.
+- **Empirically confirmed on 2026-09-17:**
+
+| Field | Value |
+|---|---|
+| `last_trade` | **16:04:58 ET** |
+| `close` (settlement) | 7637.76 |
+| 16:00:00 index price | 7637.90 |
+| **Difference** | **0.14 pts = $14/contract** |
+
+The gap is small but **one-directional and systematic** across every held fly.
+With 2–3 flies into settlement on most days, it compounds. Using the 16:00 print
+is a silent bias, not a rounding error.
+
+- Settlement P&L from intrinsic value of all four legs at `eod.close`.
 - No new positions after **15:45 ET**.
+- Note `index/history/eod` *does* return `open/high/low/close` — daily OHLC exists
+  even though intraday does not. Useful for calendar and quality layers.
 
 ### 3.9 Combo-fill integrity — mandatory, not tunable
 
-A partially filled 4-leg combo leaves the account **naked short an SPX option** —
-undefined risk on a cash-settled index. At ~20 flies/day × 8 leg-sides, partial
-fills are a certainty.
+A partial 4-leg fill leaves the account **naked short an SPX option** — undefined
+risk on a cash-settled index. At ~20 flies/day × 8 leg-sides, certain.
 
-1. **Combo-only orders.** Never leg in. Single multi-leg order, atomic or rejected.
-2. **Post-fill verification.** Assert all four legs present at expected ratios.
-   Mismatch → `FILL_INTEGRITY_BREACH`.
-3. **Breach handling.** Attempt immediate completion at market; if that fails,
-   flatten the partial. Never carry an unbalanced position to the next cycle.
-4. **Backtest modelling.** Model no-fill when combo spread >
-   `max_ba_spread_open` (1.50). Count rejected entries and report them — a
-   strategy that cannot get filled has not traded.
+1. **Combo-only orders.** Never leg in. Atomic or rejected.
+2. **Post-fill verification.** All four legs, expected ratios. Mismatch →
+   `FILL_INTEGRITY_BREACH`.
+3. **Breach handling.** Immediate completion at market; else flatten the partial.
+   Never carry an unbalanced position to the next cycle.
+4. **Backtest modelling.** No-fill when combo spread > `max_ba_spread_open`
+   (1.50). Count and report rejected entries.
 
 Correctness requirement (§13.10). Never relaxed to improve a result.
 
@@ -281,24 +283,24 @@ Correctness requirement (§13.10). Never relaxed to improve a result.
 | Tight trade price threshold | $10 |
 | Late tight threshold entry | 15:30 ET |
 
+> **Rapid-move rules now measure precisely.** At 1-second SPX, "$25 in 1 minute"
+> is evaluated against a true rolling window rather than two minute-boundary
+> samples. Expect these to fire **more often** than a 1-minute implementation
+> would — that is correctness, not a regression.
+
 **Three known conflicts — log them, do not silently resolve them:**
 
-1. **Vol halts vs. the drop rule.** VIX-change and rapid-move rules flatten the
-   book in exactly the conditions where the touch-drop would instead recenter,
-   and market-exit 3–5 flies into a dislocation with blown-out 0DTE spreads.
-   Emit `HALT_PREEMPTED_DROP`; report halt-exit slippage vs. normal. Stage 5.
-2. **Calendar defaults contradict source guidance.** The source author sits out
-   CPI and month-end/witching; defaults trade them, keeping the fattest
-   left-tail days. Stage 4.
-3. **Censored sample.** Max VIX 30 means every result is conditional on calm
-   days — and VIX < 30 does not preclude a 2% intraday move. Stage 5 via
+1. **Vol halts vs. the drop rule.** They flatten the book exactly where the
+   touch-drop would recenter, and market-exit 3–5 flies into a dislocation. Emit
+   `HALT_PREEMPTED_DROP`; report halt-exit slippage vs. normal. Stage 5.
+2. **Calendar defaults contradict source guidance.** The author sits out CPI and
+   month-end/witching; defaults trade them. Stage 4.
+3. **Censored sample.** Max VIX 30 conditions results on calm days. Stage 5 via
    `max_vix: none`.
 
 ---
 
 ## 5. Position sizing — equity-scaled
-
-Two dimensions competing for the same buying power:
 
 | Dimension | Controls | Set when |
 |---|---|---|
@@ -311,17 +313,15 @@ bp_per_fly  = contracts * reserve_per_fly
 flies_by_bp = floor(bp_available / bp_per_fly)
 ```
 
-`reserve_per_fly` is the **worst-case** max risk of a not-yet-opened fly:
+`reserve_per_fly` = worst-case max risk of a not-yet-opened fly,
 `(max_wing_width − min_expected_credit) × 100`. Default **$4,000**. An open fly
-reserves its *actual* `(w − credit) × 100`, typically ~$3,500. Reserve at entry,
+reserves its actual `(w − credit) × 100`, typically ~$3,500. Reserve at entry,
 release on exit.
 
 ### 5.1 Priority rule — flies before contracts
 
-When BP is scarce, **buy fly capacity first, contract count second.**
-
-The add/drop recentering cycle and the 2–3 fly stack into settlement *are* the
-edge — cutting fly capacity changes what the strategy is. Contract count is only
+When BP is scarce, **buy fly capacity first, contract count second.** The
+add/drop cycle and the close stack *are* the edge; contract count is only
 leverage on an edge you already have.
 
 ```
@@ -334,50 +334,40 @@ equity_required(n) = n * target_flies * reserve_per_fly / bp_utilization
 | 2 | $50,000 | $40,000 |
 | 3 | $75,000 | $60,000 |
 | 4 | $100,000 | $80,000 |
-| 5 | $125,000 | $100,000 |
 
 ### 5.2 Weekly contract scaling
 
 ```
-winning week (realized weekly P&L > 0)  -> contracts += 1
-losing  week (realized weekly P&L < 0)  -> contracts -= 1
-flat    week                            -> unchanged
-
+winning week -> contracts += 1
+losing  week -> contracts -= 1
+flat         -> unchanged
 contracts = max(1, min(scaled, floor(bp_budget / (target_flies * reserve_per_fly))))
 ```
 
-- Week = Mon–Fri, evaluated after Friday settlement.
-- Start **1 contract**, hard floor **1**.
-- Applies to the *next* week. Never resize intraweek.
-- P&L realized **including settlement**, net of commissions and fees.
+Week = Mon–Fri, evaluated after Friday settlement. Start **1**, hard floor **1**.
+Applies to the *next* week; never resize intraweek. P&L realized **including
+settlement**, net of costs.
 
 > **Known defect, pre-registered for Stage 7.** Adding a contract after a winning
-> week places maximum size immediately before the tail event, on a negatively
-> skewed strategy. This is what forced the source operator's own size cut after
-> two record losing days. `equity_banded` is the alternative.
+> week places maximum size immediately before the tail event on a negatively
+> skewed strategy — what forced the source operator's own size cut.
+> `equity_banded` is the alternative.
 
 ### 5.3 Live fly cap
 
 ```
-strategy_cap  = 2 if time < 14:00 ET else 10          # §3.4
+strategy_cap  = 2 if time < 14:00 ET else 10
 effective_cap = min(strategy_cap, flies_by_bp, 10)
 ```
 
-The drop rule is a **BP recycler** — every drop frees a full reserve and is often
-what permits the next add.
+The drop rule is a **BP recycler** — every drop frees a full reserve. An add
+blocked by `flies_by_bp` emits `BP_BLOCKED_ADD` and is **strategy degradation,
+not risk control**: it leaves a fly drifting ITM with no offsetting position.
 
-An add blocked by `flies_by_bp` rather than `strategy_cap` emits
-`BP_BLOCKED_ADD`. Treat as **strategy degradation, not risk control** — a blocked
-add leaves a fly drifting ITM with no offsetting position, the exact scenario the
-add exists to handle.
-
-**Feedback loop:** if `BP_BLOCKED_ADD` occurs on more than
-`bp_block_tolerance_days` (default **2**) days in a week, force `contracts -= 1`
-next week regardless of P&L.
+**Feedback loop:** `BP_BLOCKED_ADD` on more than `bp_block_tolerance_days`
+(default **2**) in a week → force `contracts -= 1` next week regardless of P&L.
 
 ### 5.4 The $25k account
-
-At $25,000, 80% utilization ($20,000 usable), ~$3,500–4,000 per fly:
 
 | Contracts | Flies supported | Verdict |
 |---|---|---|
@@ -387,10 +377,9 @@ At $25,000, 80% utilization ($20,000 usable), ~$3,500–4,000 per fly:
 
 **$25k runs the strategy properly at 1 contract.** Fly capacity is not the
 constraint; contract scaling is. First step to 2 contracts needs ~$50,000.
-
-Consequence: **the weekly scaling rule contributes nothing until equity roughly
-doubles.** Below ~$50k, `fixed_1` and `weekly_scaling` produce identical curves —
-if they differ in the train window, there is a bug.
+Consequence: **weekly scaling contributes nothing until equity roughly doubles.**
+Below ~$50k, `fixed_1` and `weekly_scaling` must produce identical curves — a
+difference is a bug.
 
 ### 5.5 PDT constraint
 
@@ -398,49 +387,48 @@ if they differ in the train window, there is a bug.
 if account_equity < 25000: no intraday round-trips permitted
 ```
 
-Emit `PDT_LOCKOUT` days. $25k is simultaneously the minimum for the strategy to
-function *and* the level below which it stops functioning. No buffer. Report days
-spent within 10% of the threshold.
+Emit `PDT_LOCKOUT`. $25k is simultaneously the minimum for the strategy to
+function *and* the level below which it stops. No buffer. Report days within 10%
+of the threshold.
 
 ### 5.6 Required sizing modes
 
-| Mode | Behaviour |
-|---|---|
-| `fixed_1` | 1 contract always — isolates pure strategy edge |
-| `weekly_scaling` | §5.2 with live BP caps — the mandated model |
-| `equity_banded` | §5.1 ladder only; no reference to win/loss streaks |
-| `unconstrained` | §5.2 with no BP/PDT caps — measures what the caps cost |
+`fixed_1` · `weekly_scaling` · `equity_banded` · `unconstrained`
 
 ---
 
 ## 6. Data requirements
 
-### 6.1 Subscriptions — TWO required
-
-Vendor-confirmed: Index is a **separate product** from Options. An Options plan
-does **not** include SPX or VIX.
+### 6.1 Subscriptions — TWO required, both CONFIRMED ACTIVE
 
 | Product | Tier | Provides | First access |
 |---|---|---|---|
-| **Options** | Value (~$40/mo) | SPXW chain: EOD, OHLC, **Quote**, Open Interest | **2020-01-01** |
-| **Index** | Value | **SPX 1-min spot, VIX 1-min, SPX EOD close** | **2023-01-01** |
+| **Options** | VALUE | SPXW chain: EOD, OHLC, **Quote**, Open Interest | **2020-01-01** |
+| **Index** | VALUE | **SPX 1s/1m spot, VIX, SPX eod.close** | **2023-01-01** |
+| Stock | FREE | unused | — |
+| Rate | FREE | unused | — |
 
-Index Value is **mandatory** — three hard requirements depend on it: the spot
-series driving every trigger (§3.2, §3.3), VIX for the halt rules (§4), and the
-settlement close (§3.8). Both first-access dates cover the 2023-09 lookback.
+Both cover the 2023-09 lookback. Index is **mandatory** — spot, VIX and
+settlement all live there.
 
 ### 6.2 Datasets and windows
 
 | # | Dataset | Source | Granularity | Window |
 |---|---|---|---|---|
-| 1 | SPX index price | Index | 1-min | 2 yrs |
+| 1 | SPX index price | Index | **1-second** | 2 yrs |
 | 2 | SPXW 0DTE NBBO | Options `option/history/quote` | 1-min | 2 yrs |
-| 3 | Implied volatility | computed from #2 | 1-min | 2 yrs **+ 1 yr lookback** |
-| 4 | VIX | Index | 1-min + daily open | 2 yrs (+1 yr) |
+| 3 | Implied volatility | computed from #2 | 1-min | 2 yrs **+ 1 yr** |
+| 4 | VIX | Index | **1-second** + daily open | 2 yrs |
 | 5 | **SPX EOD close (= settlement)** | Index `index/history/eod` | daily | 2 yrs |
 | 6 | Econ calendar flags | external | daily | 2 yrs |
 
-**Train/holdout split — fixed now, before any run:**
+**Lookback year (2023-09 → 2024-09):** 1-minute suffices — it feeds IV Rank only.
+Use `strike_range=5`.
+
+**Volume:** SPX 1s ≈ 23,400 rows/day × 504 ≈ **11.8M rows ≈ 0.19 GB**. Options
+1-min ≈ 47.6k rows/day ≈ **24M rows ≈ 1.4 GB**. Total comfortably under 2 GB.
+
+**Train/holdout split — fixed, before any run:**
 
 | Window | Period | Use |
 |---|---|---|
@@ -453,34 +441,45 @@ broken.
 
 ### 6.3 Strike coverage
 
-`strike_range=30` returns 30 strikes above + 30 below + ATM = **61 strikes** ≈
-**±150 points** on a 5-point grid.
-
-≈122 contracts/day × 390 min ≈ **47.6k rows/day** ≈ **24M rows over 2 years** ≈
-**1–2 GB** partitioned Parquet. Partition by date, memory-map per day.
-
-**Lookback-year optimization:** IV Rank needs only ATM implied vol, so pull
-`strike_range=5` (±25 points) for 2023-09 → 2024-09. Cuts roughly a third off
-total download with no loss of fidelity.
+**Confirmed:** `strike_range=N` returns `2N+1` strikes (`strike_range=2` → 5).
+So **`strike_range=30` → 61 strikes ≈ ±150 points**, matching the requirement.
 
 ### 6.4 Greeks and IV
 
 **Greeks are not required** — every trigger is price-distance based. Trade, Trade
-Quote and Greeks endpoints require Standard+; we need none of them.
+Quote and Greeks endpoints require Standard+; we need none.
 
 **Compute IV from the quote midpoint** with a fixed rate/dividend assumption.
-0DTE IV inversion goes numerically unstable in the final hour as extrinsic
-collapses — return `None` and log, never a garbage number. Report failure rate by
-hour.
+0DTE IV inversion goes numerically unstable in the final hour — return `None` and
+log, never a garbage number. Report failure rate by hour. Fallback: **VIX
+percentile rank** via `iv_rank_source: "computed" | "vix_proxy"`.
 
-Fallback: **VIX percentile rank**, via `iv_rank_source: "computed" | "vix_proxy"`.
+### 6.5 Fill modelling — the dominant hazard
 
-### 6.5 Fill modelling — with snapshot latency
+**Resolving §6.7 did not remove the modelling risk; it relocated it.**
+
+```
+SPX triggers:   1-second resolution   (precise)
+Option pricing: 1-minute snapshots    (coarse)
+```
+
+A touch detected at 14:32:07 cannot be priced until the **14:33:00** snapshot —
+up to **59 seconds** of latency between decision and priceable fill. This is
+**systematically adverse**: price has usually continued moving in the direction
+that triggered the exit.
 
 At Value, `interval=1m` returns the **last NBBO at that timestamp** — a
-point-in-time snapshot, not a bar. No intraminute high/low on quotes. (The option
-OHLC endpoint *is* included, but its high/low come from **trades**, not quotes;
-there is no NBBO high/low aggregate.)
+point-in-time snapshot, not a bar. The option OHLC endpoint is included but its
+high/low come from **trades**, not quotes; there is no NBBO high/low aggregate.
+
+**`snapshot_latency` — a primary parameter, not an adjustment:**
+
+| Mode | Assumption |
+|---|---|
+| `next_snapshot` | Price at the next 1-min option snapshot — **default, realistic** |
+| `same_snapshot` | Price at the preceding snapshot — optimistic bound |
+
+**Fill modes:**
 
 | Mode | Assumption |
 |---|---|
@@ -488,123 +487,121 @@ there is no NBBO high/low aggregate.)
 | `realistic` | Mid + `0.10` against you, per fly per side |
 | `pessimistic` | Full bid/ask |
 
-**`snapshot_latency` (new, mandatory).** A trigger firing between snapshots is
-priced at the **next available snapshot**, not at the trigger moment — up to 60
-seconds of latency. Model it explicitly; it is a systematic drag, not noise, and
-it is closer to live behaviour than instantaneous fills.
-
 Also model commissions (per-leg × 4 legs × 2 sides), exchange fees, and no-fill
-when combo spread > `1.50` (§3.9).
+when combo spread > `1.50`.
 
-**Edge that survives only at `optimistic` does not exist.**
+**Edge that survives only at `optimistic` / `same_snapshot` does not exist.**
 
-### 6.6 Confirmed request shape
+### 6.6 Confirmed API shapes
+
+**Base URL:** `http://127.0.0.1:25503` · **Responses: CSV, not JSON.** Parse
+accordingly; cache raw CSV before any transformation.
 
 ```
 GET /v3/option/history/quote
-    root=SPXW
-    expiration=*
-    strike_range=30
-    max_dte=0
-    right=both
-    interval=1m
-    date=YYYYMMDD
+    root=SPXW  expiration=*  strike_range=30  max_dte=0
+    right=both  interval=1m  date=YYYYMMDD
+→ root,date,strike,right,timestamp,bid_size,bid_price,ask_price,ask_size
+
+GET /v3/index/history/price
+    root=SPX  interval=1s  date=YYYYMMDD
+→ timestamp,price
+
+GET /v3/index/history/eod
+    root=SPX  date=YYYYMMDD
+→ created,last_trade,open,high,low,close,volume,count,
+  bid_size,bid_exchange,bid,bid_condition,ask_size,ask_exchange,ask,ask_condition
 ```
 
-Vendor-confirmed: all parameters supported at Value; "exactly the supported
-shape." One request per date, ~750 requests total.
+**Sub-1m intervals are single-day requests only** — 504 separate calls for the 1s
+index pull. Routine, but the downloader must checkpoint and resume.
 
-**Bulk — resolved, no upgrade needed.** Two meanings were conflated:
+**Bulk — resolved.** Full chain for one underlying in one request
+(`expiration=*`) works at Value. Flat Files are whole-market dumps limited to the
+7 most recent days — irrelevant. **Do not upgrade to Professional.**
 
-| Meaning | Tier | Relevant? |
-|---|---|---|
-| Full chain for one underlying, one request (`expiration=*`) | **Value** | **Yes — what we need** |
-| Flat Files: whole market, one date | Professional, **7 most recent days only** | No |
+**Operational:** Theta Terminal v3 must be running. The downloader must fail
+loudly when it is not, and must checkpoint/resume. **Cache raw responses to disk
+before any transformation.**
 
-Flat Files cover only the last 7 calendar days — useless for a 2-year backtest at
-any tier. **Do not upgrade to Professional for "bulk."**
+### 6.7 SPX trigger resolution — RESOLVED
 
-**Build on v3.** Vendor-recommended; all parameters above are v3.
+`index/history/price` returns only `timestamp,price` — **no OHLC at any intraday
+interval**. But the interval enum reaches `1s`, and **`interval=1s` is permitted
+on Index Value**.
 
-**Operational:** requires a local **Theta Terminal v3** process. The downloader
-must fail loudly when it is not up, and must checkpoint/resume. **Cache raw
-responses to disk before any transformation** — re-downloading two years because
-of a parsing bug is the most avoidable time sink in this project. The terminal
-prints exact access levels at startup; verify they match both subscriptions.
+**D0 measurement, SPX 2026-09-17:**
 
-### 6.7 OPEN BLOCKING QUESTION — resolve before D4
-
-Everything in §6.5 concerns *option* data. But **every trigger in this strategy
-reads SPX, not option prices.**
-
-> Does `index/history/price` with `interval=1m` return an **OHLC bar** (open,
-> high, low, close) per minute, or a **point-in-time snapshot** like the option
-> quote endpoint? If snapshot-only, is there an `index/history/ohlc` at 1-minute
-> on Index Value?
-
-| If SPX 1-min is… | Consequence |
+| Metric | Value |
 |---|---|
-| **OHLC** | Intrabar touch detection works. M5 runs as specified (§13.1). |
-| **Snapshot only** | Touches and adds detectable **only at minute boundaries**. Any touch that occurs and reverts inside a minute is **invisible**. |
+| Rows returned (09:30–16:00) | **23,403** |
+| Distinct timestamps | 23,402 |
+| Gaps | 23,400 × 1s, 1 × 2s |
+| Repeated prices omitted? | **No** — series is dense, contrary to the docs |
 
-The snapshot-only case is a **systematic bias, not noise** — it under-counts both
-drops and adds, and the source author explicitly describes touches that revert
-before he can click. That is exactly the population that would vanish.
+**Therefore touch detection is sub-minute, not minute-boundary.**
 
-It does not necessarily kill the project; minute-boundary detection is arguably
-closer to what a human operator reacts to. But it changes the M5 test from *"which
-order did events occur within the bar?"* to *"how much does the strategy change
-when sub-minute touches are invisible?"* — different test, different
-implementation.
+| Metric | 1-minute | **1-second** |
+|---|---|---|
+| Observations/session | 390 | **23,400** |
+| Mean time-to-detect a touch | 30 s | **0.5 s** |
+| `touch_confirm_seconds = 10` | unresolvable | **directly testable** |
 
-**Do not implement §13.1 or launch the full pull until this is answered.**
+Consequences: §7.1 intrabar ambiguity for *triggers* largely dissolves; §13.1
+drops from hard gate to expected formality; `touch_confirm` returns as a
+first-class Stage 6 axis; **no Standard-tier upgrade is required.**
 
-### 6.8 Data quality gates — build before the first backtest run
+### 6.8 Data quality gates — SEVEN, build before the first backtest run
 
 1. **Missing strikes** — flag any minute where a needed strike is absent.
 2. **Crossed/locked quotes** (bid ≥ ask) — drop or forward-fill; log counts.
 3. **Zero-bid wings** — common deep OTM; decide fill policy explicitly.
 4. **Stale quotes** — unchanged bid/ask > N minutes on a near-ATM strike.
+   **Exclude the opening minutes** or this fires constantly (§3.1).
 5. **Half days** — 13:00 ET closes break the 14:00 tight switch and settlement.
-6. **0DTE availability** — SPX did not always list 0DTE on all five weekdays.
-   Verify expiry availability per date; never assume.
+6. **0DTE availability** — verify expiry availability per date; never assume.
+7. **Index price validity (new).** Reject any index price of `0.0`, or any print
+   deviating more than **5%** from the prior valid print.
 
-Do not trust a replay that has not passed all six.
+> Gate 7 exists because the **09:30:00.000 SPX print is literally `0.0`**, with
+> the first valid price at 09:31:00. Entry is at 11:00 so it should never reach
+> the engine — but a phantom 7,600-point move must be rejected explicitly, not
+> avoided by luck.
+
+Do not trust a replay that has not passed all seven.
 
 ---
 
 ## 7. Modelling hazards
 
-### 7.1 Intrabar / inter-snapshot sequencing
-**Definition pending §6.7.** If SPX 1-min is OHLC, you know the high and low but
-not their order — default `conservative` (adverse event first). If snapshot-only,
-the hazard is instead *unobservable* sub-minute excursions. Either way, expose
-`intrabar_assumption` and quantify it at §13.1.
+### 7.1 Trigger/fill asymmetry — the dominant hazard
+Triggers resolve at 1-second; fills price at 1-minute snapshots. Up to 59s of
+systematically adverse latency (§6.5). This **replaces** intrabar ordering as the
+primary risk and is what §13.1 now measures.
 
 ### 7.2 Settlement, not last trade
-SPXW settles to the SPX index close from `index/history/eod.close`. The index
-prints until ~16:04–16:05 ET; the 16:00:00 quote is **not** settlement. Using it
-biases every held fly in the same direction. See §3.8.
+SPXW settles to `index/history/eod.close`. D0-confirmed: final print 16:04:58,
+and the 16:00:00 value differs by 0.14 pts = $14/contract, one-directional across
+every held fly. See §3.8.
 
-### 7.3 Touch confirmation fidelity
-`touch_confirm_seconds = 10` cannot be evaluated at 1-min granularity. In
-backtest, degrade to the best available detection (§6.7) and **state the
-approximation in the report header**. A known live-vs-backtest divergence, not a
-bug to hide.
+### 7.3 Touch confirmation — now measurable
+`touch_confirm_seconds = 10` is directly observable at 1s resolution (10 samples
+per window). No longer an approximation; it is a Stage 6 axis. The remaining
+live-vs-backtest gap is reaction and order latency, not detection.
 
 ### 7.4 Sequence risk
 Outcomes depend heavily on start date. Report rolling 3-month windows and the
-worst start date — never a single aggregate CAGR. Weekly sizing amplifies this.
+worst start date — never a single aggregate CAGR.
 
 ### 7.5 Overfitting surface
 Enough knobs to fit anything. **Fix all parameters at documented values for the
-primary run.** Any sweep is a separate, labelled sensitivity study. §13.0 governs.
+primary run.** §13.0 governs.
 
 ### 7.6 The structural prior
 Selling an ATM 0DTE straddle is selling gamma at the highest-gamma point on the
 surface; the premium is approximately fair. The add/drop cycle does not obviously
-*create* edge — it **reshapes the distribution** into many small wins and rare
-large losses. Judge results against that prior.
+*create* edge — it **reshapes the distribution**. Judge results against that
+prior.
 
 ---
 
@@ -629,7 +626,7 @@ open 4570 → add 4560 → tight switch → add 4565
 ```
 
 **Scenario C — loser.** Synthetic EKG day (±20 pt oscillation); assert the engine
-churns flies and loses. The test is that it *degrades as described*.
+churns flies and loses.
 
 **Unit tests, minimum:**
 - `be_pct` exit: credit 15 / center 5430 → `5417.25 / 5442.75`
@@ -643,8 +640,12 @@ churns flies and loses. The test is that it *degrades as described*.
   stop at 5h, 3h, 1h and 0.2h to expiry
 - **Combo integrity:** a simulated 3-of-4 leg fill raises
   `FILL_INTEGRITY_BREACH` and never persists to the next cycle
-- **Settlement uses `index/history/eod.close`, not the 16:00 quote**
-- **`snapshot_latency`:** a trigger between snapshots prices at the next one
+- **Settlement uses `eod.close`, not the 16:00 print** — assert the $14/contract
+  difference is captured
+- **`snapshot_latency`:** a trigger at 14:32:07 prices at the 14:33:00 snapshot
+- **Gate 7:** an index price of `0.0` is rejected, not propagated
+- **`touch_confirm`:** a 6-second touch does not fire at `10s`; an 11-second one
+  does
 - Weekly sizing: win→+1, loss→−1, floor at 1
 - Contract step-up blocked below $50k at a 5-fly target
 - `BP_BLOCKED_ADD` on 3 days in one week forces `contracts -= 1` next week
@@ -664,18 +665,19 @@ max drawdown (%), Sharpe, **profit factor (primary metric)**, worst 5 days,
 | Diagnostic | Why |
 |---|---|
 | **Whipsaw cost** | Realized P&L on add-then-drop round trips closing within 30 min. The strategy's recurring toll. |
+| **Snapshot-latency cost** | P&L delta `next_snapshot` vs `same_snapshot`. Isolates §6.5, the dominant hazard. |
 | **Exit-reason split** | Any material `stop_25` is a **bug signal** (§3.7). |
 | **Profitable-breakeven-exit share, by hour** | Detects the §3.6 late-session inversion. |
 | **`HALT_PREEMPTED_DROP`** + halt-exit slippage | Prices what the vol-flatten rule costs. |
 | **Rejected entries** (spread > 1.50) | A strategy that cannot get filled has not traded. |
 | **Fly-count distribution** | 2 pre-14:00, 2–3 at settlement. Routinely 1 = adds not firing. |
-| **Snapshot-latency cost** | P&L delta vs. instantaneous fills — isolates §6.5 drag. |
+| **Sub-minute touch count** | Touches that occur and revert within 60s — the population a 1-minute feed would have missed entirely. |
 
 **Sizing section:** realized vs. unconstrained contract count, `BP_BLOCKED_ADD`
 days, forced size-downs, `PDT_LOCKOUT` days, days within 10% of $25k, peak/mean
 BP utilization, date equity first supported 2 contracts.
 
-**Headline reported at `fill=realistic` × `intrabar=conservative` only.**
+**Headline reported at `fill=realistic` × `snapshot_latency=next_snapshot` only.**
 
 ---
 
@@ -686,31 +688,30 @@ BP utilization, date equity first supported 2 contracts.
 2. **Half days / no-0DTE dates** — default **skip entirely**, log as excluded.
 3. **Partial first week** — ignore weeks with < 3 trading days for scaling.
 4. **Paper-trade duration before live** — minimum **20 sessions**.
-5. **Index Value monthly price** — confirm on the pricing page.
+5. **VIX at 1s** — confirm permitted and dense in D1 (SPX is; VIX untested).
 
 ---
 
 ## 11. Build order — data-first
 
-| # | Step | Gate |
-|---|---|---|
-| **D0** | Subscribe Options Value **+ Index Value**; launch Theta Terminal v3; **resolve §6.7** | Terminal prints access for both products |
-| **D1** | Probe one day: option chain + SPX index sample | ~122 contracts × 390 min; SPX shape known |
-| **D2** | Downloader: raw cache, checkpoint/resume, Parquet | 20 pilot days on disk |
-| **D3** | Quality gates (§6.8) + loader with holdout guard | All six pass; guard provably raises |
-| **D4** | **Full pull** — unattended | Manifest complete; gates pass across range |
-| M1 | `core/` rules, sizing, integrity + unit tests | §8 unit tests green. **No data needed — build during D4** |
-| M3 | `adapters/backtest.py` + `core/engine.py` | One real day replays; §3.5 ordering provable |
-| M4 | §8 scenario tests (synthetic surfaces) | Sequences A and B reproduce |
-| M5 | **§13.1 path-sensitivity gate** | **Spread < 50%, or STOP** |
-| M6 | Stages 2–7 (§13) | ≤42 runs, ledger complete |
-| M7 | Stage 8 holdout | One shot, 6 runs |
-| M8 | **Written verdict** | **Human sign-off — hard stop** |
-| M9 | `adapters/tradier.py`, paper | ≥20 sessions |
-| M10 | Live, 1 contract | — |
+| # | Step | Gate | Status |
+|---|---|---|---|
+| D0 | Subscriptions, Terminal v3, **resolve §6.7** | Both products active | ✅ **DONE** |
+| D1 | Probe one full day at production settings; time it | Coverage + wall-clock known | ← next |
+| D2 | Downloader, 20 pilot days | Pilot on disk | |
+| D3 | Seven quality gates + holdout guard | All pass; guard raises | |
+| D4 | **Full pull**, unattended | Manifest complete | |
+| M1 | `core/` rules, sizing, integrity + unit tests | §8 green. **No data needed — build during D4** | |
+| M3 | `adapters/backtest.py` + `core/engine.py` | One real day replays; ordering provable | |
+| M4 | §8 scenario tests | Sequences A and B reproduce | |
+| M5 | **§13.1 latency-sensitivity gate** | **Spread < 50%** | |
+| M6 | Stages 2–7 | ≤42 runs, ledger complete | |
+| M7 | Stage 8 holdout | One shot, 6 runs | |
+| M8 | **Written verdict** | **Human sign-off — hard stop** | |
+| M9 | Tradier paper | ≥20 sessions | |
+| M10 | Live, 1 contract | — | |
 
-**D1–D3 use 20 pilot days only.** A schema mistake replicated across 500 days is
-hours wasted. **M1 runs concurrently with D4** — the rules layer is pure.
+**M1 runs concurrently with D4.** **M8 is a hard stop.**
 
 ---
 
@@ -718,7 +719,7 @@ hours wasted. **M1 runs concurrently with D4** — the rules layer is pure.
 
 ```
 nfh/
-  config/default.yaml       # every number in §3–§5; nothing hard-coded
+  config/default.yaml       # every number in §3–§5; base_url; nothing hard-coded
   core/
     fly.py                  # Fly: legs, center, credit, breakevens, max_risk, mark()
     book.py                 # open flies, anchor selection, cap enforcement
@@ -728,14 +729,14 @@ nfh/
     integrity.py            # §3.9 combo-fill verification
     calendar.py             # FOMC/CPI/PPI/PCE/NFP/witching/OpEx/EOQ + half days
   data/
-    thetadata.py            # v3 downloader: checkpoint, resume, raw cache
+    thetadata.py            # v3 CSV downloader: checkpoint, resume, raw cache
     loader.py               # parquet → ChainSnapshot; train/holdout guard
     chain.py                # strike → (bid, ask); snap_strike
-    index.py                # SPX spot, VIX, settlement close (§6.1 Index product)
+    index.py                # SPX 1s spot, VIX, eod.close settlement
     iv.py                   # IV from mid; IV Rank; VIX proxy fallback
-    quality.py              # §6.8 gates
+    quality.py              # §6.8 — seven gates
   adapters/
-    backtest.py
+    backtest.py             # fill modes + snapshot_latency
     tradier.py
   backtest/
     runner.py               # §13 stage orchestration
@@ -746,7 +747,7 @@ nfh/
 
 Hard requirements:
 - `core/rules.py` and `core/sizing.py` are **pure functions** — no I/O, no clock,
-  no network. This is what makes the strategy testable without a subscription.
+  no network. Testable with no subscription.
 - The engine must not know whether it is backtesting or live. **One code path.**
 - Every number in §3–§5 comes from config.
 
@@ -756,38 +757,46 @@ Hard requirements:
 
 ### 13.0 Selection protocol — non-negotiable
 
-A full grid of the axes below is **186,624 runs** against ~500 trading days. The
-best of 186k runs is overfit with near-certainty.
+A full grid is **186,624 runs** against ~500 trading days. The best of 186k runs
+is overfit with near-certainty.
 
 1. **Split the data before the first run** (§6.2). Holdout touched **once** at
-   §13.8. Run it twice and it is burned — no recovery short of new market data.
-2. **Test sequentially, not as a grid.** Each stage fixes its winner; the next
-   varies one family against that base. **48 runs total.** Adopt only if it beats
-   the base by more than 1σ (§13.9).
-3. **Judge every stage at `fill=realistic`, `intrabar=conservative`.**
+   §13.8. Run it twice and it is burned.
+2. **Test sequentially, not as a grid.** Each stage fixes its winner. **48 runs
+   total.** Adopt only if it beats the base by more than 1σ (§13.9).
+3. **Judge every stage at `fill=realistic`, `snapshot_latency=next_snapshot`.**
 
 **Accepted trade-off:** sequential testing can miss interaction effects. A grid
 able to find real ones would surface thousands of false ones. A missed
 interaction costs upside; a fitted one costs capital.
 
-### 13.1 Stage 1 — Path-sensitivity pilot **(GATE)** ⚠️ BLOCKED ON §6.7
+### 13.1 Stage 1 — Latency-sensitivity pilot (2 runs)
 
-2 runs, 20 train days, baseline config.
+**Redefined.** With §6.7 resolved, this no longer tests intrabar ordering or
+sub-minute invisibility. It now measures **option-quote latency sensitivity**:
 
-**Test definition depends on §6.7.** If SPX 1-min is OHLC: conservative vs.
-optimistic intrabar ordering. If snapshot-only: measure sensitivity to
-unobservable sub-minute excursions instead.
+| Run | `snapshot_latency` |
+|---|---|
+| 1.1 | `next_snapshot` (realistic) |
+| 1.2 | `same_snapshot` (optimistic bound) |
 
-**Gate:** if the P&L spread exceeds **50% of mean P&L**, 1-minute data cannot
-resolve this strategy. **Stop.** Upgrade to Standard (~$80, tick-level, same API)
-or abandon.
+20 train days, baseline config, `fill=realistic`.
 
-Also report same-bar/same-interval collision counts — a high count with a passing
-spread means you were lucky, not safe.
+**Threshold unchanged:** if the P&L spread exceeds **50% of mean P&L**, the
+strategy's measured edge is dominated by fill-timing assumptions and no
+downstream result is trustworthy. Stop and reconsider.
+
+**Expectation has changed.** Previously a hard go/no-go that could kill the
+project; now expected to pass. Treat a failure as genuinely surprising and
+investigate for bugs before accepting it.
+
+Also report the **sub-minute touch count** — touches that occurred and reverted
+within 60 seconds. That number is exactly what a 1-minute feed would have missed,
+and it quantifies what the 1s pull bought you.
 
 ### 13.2 Stage 2 — Baseline surface (6 runs)
-`fill_mode` (3) × `intrabar_assumption` (2). Run the §13.13 defect checklist
-before interpreting any P&L.
+`fill_mode` (3) × `snapshot_latency` (2). Run the §13.13 defect checklist before
+interpreting any P&L.
 
 ### 13.3 Stage 3 — Exit family (12 runs)
 `stop_basis` (credit / max_risk / none) × `be_mode` (static_85 / static_80 /
@@ -799,12 +808,21 @@ Skip CPI × Skip Triple Witching. **Judge on the left tail**, not the mean.
 
 ### 13.5 Stage 5 — Volatility halts (6 runs)
 `vol_halt_mode` (flatten / halt_adds_only / off) × `max_vix` (30 / none). Report
-halt-exit slippage vs. normal.
+halt-exit slippage vs. normal. Note the rapid-move rules now evaluate on true
+rolling 1s windows (§4).
 
 ### 13.6 Stage 6 — Structure (6 runs)
-`wing_cap_mode` (premium_only / vol_capped) × `touch_confirm` (instant / 10s /
-30s). **Drop `touch_confirm` entirely if Stage 1's spread was wide** — it is
-unresolvable and must be settled live.
+
+**`touch_confirm` restored as a first-class axis** — directly measurable at 1s.
+
+| Axis | Values |
+|---|---|
+| `wing_cap_mode` | `premium_only` / `vol_capped` |
+| `touch_confirm` | `instant` / `5s` / `10s` / `30s` |
+
+This directly prices the whipsaw toll — the strategy's core recurring cost — and
+tests the exact mechanism the source author describes reacting to manually. It is
+arguably the most informative single axis in the matrix.
 
 ### 13.7 Stage 7 — Sizing (6 runs)
 `sizing_mode` (fixed_1 / weekly_scaling / equity_banded) × `start_equity` (25000 /
@@ -818,7 +836,7 @@ it beats baseline in the same **direction and rough magnitude** as in train.
 
 ### 13.9 Metrics and margins
 
-Primary: **profit factor at `realistic` × `conservative`.** Not total P&L.
+Primary: **profit factor at `realistic` × `next_snapshot`.** Not total P&L.
 
 **Noise margin.** Before Stage 2, run the baseline on 10 bootstrap resamples of
 train; record profit-factor σ. **Any improvement < 1σ is noise.** Prefer the
@@ -841,26 +859,25 @@ simpler config on ties.
 ```
 run_id, stage, git_sha, config_hash, data_window, varied params,
 profit_factor, total_pnl, max_dd_pct, win_rate, whipsaw_cost,
-exit_reason_split, n_days, timestamp
+snapshot_latency_cost, exit_reason_split, n_days, timestamp
 ```
 
 The audit trail proving the holdout was touched once.
 
 ### 13.12 Total cost
 
-| Stage | Runs |
-|---|---|
-| 1 gate / 2 / 3 / 4 / 5 / 6 / 7 / 8 | 2 / 6 / 12 / 4 / 6 / 6 / 6 / 6 |
-| **Total** | **48** |
+| Stage | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | **Total** |
+|---|---|---|---|---|---|---|---|---|---|
+| Runs | 2 | 6 | 12 | 4 | 6 | 6 | 6 | 6 | **48** |
 
 ≈1.2 hours at 90s/run, vs. ~4,666 hours for the full grid — and **more reliable**.
 
 ### 13.13 If Stage 2 fails
 
 **First, rule out defects:** scenario tests passing? Any `stop_25` firing? Fly
-count routinely 1? Quality gates clean? Settlement using `eod.close`? If
-flies-into-settlement ≈ 1 or `stop_25` fires at all, **stop and fix** — that is
-not a result.
+count routinely 1? All seven quality gates clean? Settlement using `eod.close`?
+Any index price of 0.0 reaching the engine? If flies-into-settlement ≈ 1 or
+`stop_25` fires at all, **stop and fix** — that is not a result.
 
 **Then judge by magnitude:**
 
@@ -875,7 +892,7 @@ tail management is broken (fixable). Steady daily erosion means you are selling
 fair-value gamma and paying spread (not fixable by parameters).
 
 **Kill criteria — written now so they cannot be negotiated later:**
-1. Stage 3's best still unprofitable at `realistic` × `conservative` → stop.
-2. Recovery requires `optimistic` fills → stop. That edge does not exist.
+1. Stage 3's best still unprofitable at `realistic` × `next_snapshot` → stop.
+2. Recovery requires `optimistic` fills or `same_snapshot` → stop.
 3. Profitability hinges on one parameter value with no mechanism → stop.
 4. Stages 3–7 recover it but Stage 8 does not confirm → stop. Definitive.
